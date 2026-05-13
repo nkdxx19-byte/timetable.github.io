@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多機能時間割マネージャー</title>
+<!-- 画像保存機能のためのライブラリ -->
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  :root {
+    --primary: #2196F3;
+    --primary-dark: #1976D2;
+    --bg-body: #f4f7f9;
+    --bg-panel: #ffffff;
+    --text-main: #333333;
+    --text-sub: #666666;
+    --border-color: #cfd8dc;
+    --danger: #f44336;
+  }
+  body {
+    font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+    background-color: var(--bg-body);
+    color: var(--text-main);
+    margin: 0;
+    padding: 10px;
+    line-height: 1.4;
+  }
+  
+  /* --- ツール全体の枠（幅を揃えるためのコンテナ） --- */
+  .app-container {
+    max-width: 600px; /* PCなどで大きくなりすぎないための最大幅 */
+    margin: 0 auto;   /* 画面の中央に配置 */
+    width: 100%;
+  }
+
+  h1 { text-align: center; font-size: 1.4em; margin: 10px 0; color: var(--primary-dark); }
+
+  /* 時間割管理エリア */
+  .management-bar {
+    background: var(--bg-panel);
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .top-row { display: flex; gap: 6px; align-items: center; }
+  select {
+    flex: 1; padding: 8px; border-radius: 4px; font-weight: bold;
+    border: 1px solid var(--border-color); background: white; min-width: 0; text-overflow: ellipsis;
+  }
+  .btn-row { display: flex; gap: 5px; flex-wrap: wrap; }
+
+  /* ボタン */
+  button {
+    background-color: var(--primary); color: white; border: none;
+    padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    font-weight: bold; cursor: pointer; transition: opacity 0.2s;
+  }
+  button:active { opacity: 0.7; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; background-color: #9e9e9e; }
+  button.secondary { background-color: #78909c; }
+  button.danger { background-color: var(--danger); }
+  button.outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
+  button.action-btn { background-color: #4CAF50; }
+  button.small { padding: 6px 4px; font-size: 11px; flex: 1; text-align: center; }
+
+  /* --- 正方形の時間割表デザイン --- */
+  .export-wrapper {
+    width: 100%;
+    aspect-ratio: 1 / 1; /* 正方形にする */
+    background: white;
+    padding: 10px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+  table {
+    width: 100%;
+    height: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* 列幅の固定 */
+  }
+  
+  /* 行の高さは6等分 */
+  tr { height: 16.66%; }
+  
+  th, td {
+    border: 1px solid var(--border-color);
+    text-align: center;
+    vertical-align: middle;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 2px;
+  }
+  th { background-color: #f8f9fa; font-size: 12px; color: var(--text-sub); }
+  
+  .time-text {
+    display: block;
+    font-size: 9px;
+    color: #888;
+    margin-top: 4px;
+    font-weight: normal;
+    line-height: 1.2;
+    text-align: center;
+  }
+  
+  td.cell {
+    background-color: var(--bg-panel);
+    cursor: pointer;
+    position: relative;
+    transition: filter 0.2s;
+  }
+  td.cell:hover { filter: brightness(0.95); }
+  td.cell.has-task { border-bottom: 4px solid #fbc02d; }
+  
+  .course-name {
+    font-size: 11px;
+    font-weight: bold;
+    color: #111;
+    margin-bottom: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .course-room { font-size: 9px; color: #555; }
+
+  /* モーダル共通 */
+  .modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal-content {
+    background-color: var(--bg-panel); padding: 20px; border-radius: 12px;
+    width: 92%; max-width: 450px; max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  }
+  .modal-content h2 { margin: 0 0 15px 0; font-size: 1.1em; border-left: 4px solid var(--primary); padding-left: 10px; }
+  
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-sub); }
+  input[type="text"], input[type="date"], textarea, select {
+    width: 100%; padding: 10px; box-sizing: border-box; font-size: 14px;
+    border: 1px solid #ccc; border-radius: 6px;
+  }
+
+  /* カラーパレット */
+  .color-palette { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; }
+  .color-btn { 
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer; 
+    border: 2px solid transparent; transition: transform 0.1s; 
+  }
+  .color-btn.selected { border-color: var(--text-main); transform: scale(1.15); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+
+  /* 出欠カウンター */
+  .counter-row { display: flex; gap: 10px; margin-bottom: 15px; }
+  .counter-item { flex: 1; display: flex; align-items: center; justify-content: space-between; background: #f8f9fa; padding: 8px; border-radius: 6px; }
+  .counter-val { font-weight: bold; font-size: 16px; min-width: 20px; text-align: center; }
+
+  /* 複数課題エリア */
+  .task-list-edit { background: #fffde7; padding: 10px; border-radius: 8px; border: 1px solid #fff59d; margin-top:15px; }
+  .task-entry { background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px; border: 1px solid #eee; position: relative; }
+  .btn-add-task { width: 100%; margin-top: 5px; background: #fbc02d; color: #333; }
+  .task-delete { position: absolute; right: 5px; top: 5px; color: var(--danger); font-size: 18px; cursor: pointer; padding: 0 5px; }
+
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; position: sticky; bottom: -20px; background: white; padding: 10px 0; border-top: 1px solid #eee; }
+  .modal-actions button { flex: 1; }
+
+</style>
+</head>
+<body>
+
+<!-- ツール全体を囲むコンテナを追加 -->
+<div class="app-container">
+
+  <h1>時間割マネージャー</h1>
+
+  <div class="management-bar">
+    <div class="top-row">
+      <select id="timetableSelect" onchange="switchTimetable()"></select>
+      <button class="secondary" onclick="moveTimetable(-1)" title="上に移動" style="padding: 8px 10px; flex:none;">↑</button>
+      <button class="secondary" onclick="moveTimetable(1)" title="下に移動" style="padding: 8px 10px; flex:none;">↓</button>
+      <button id="defaultBtn" class="outline" onclick="setDefaultTimetable()" style="padding: 8px; font-size: 12px; flex:none;">★設定</button>
+    </div>
+    <div class="btn-row">
+      <button class="secondary small" onclick="promptNewTimetable()">＋ 新規</button>
+      <button class="secondary small" onclick="copyTimetable()">📋 複製</button>
+      <button class="secondary small" onclick="renameTimetable()">✏️ 名前変更</button>
+      <button class="danger small" onclick="deleteCurrentTimetable()">🗑️ 削除</button>
+    </div>
+    <div class="btn-row" style="margin-top: 5px;">
+      <button class="outline small" onclick="openTimeSettingModal()">🕒 時限の時間設定</button>
+      <button class="action-btn small" onclick="exportImage()">📸 画像として出力</button>
+    </div>
+    <button style="width:100%; margin-top: 5px;" onclick="openAllTaskList()">📋 全課題一覧を見る</button>
+  </div>
+
+  <!-- 正方形の枠で囲んだ時間割表エリア -->
+  <div class="export-wrapper" id="timetableWrapper">
+    <table>
+      <!-- 列の幅を割合で設定 (合計100%) -->
+      <colgroup>
+        <col style="width: 12%;">   <!-- 時限列 -->
+        <col style="width: 17.6%;"> <!-- 月 -->
+        <col style="width: 17.6%;"> <!-- 火 -->
+        <col style="width: 17.6%;"> <!-- 水 -->
+        <col style="width: 17.6%;"> <!-- 木 -->
+        <col style="width: 17.6%;"> <!-- 金 -->
+      </colgroup>
+      <thead>
+        <tr id="headerRow">
+          <!-- JSで生成 -->
+        </tr>
+      </thead>
+      <tbody id="timetableBody">
+        <!-- JSで生成 -->
+      </tbody>
+    </table>
+  </div>
+
+</div> <!-- /.app-container -->
+
+<!-- 時限の時間設定モーダル -->
+<div id="timeSettingModal" class="modal-overlay">
+  <div class="modal-content">
+    <h2>🕒 時限の時間設定</h2>
+    <p style="font-size:12px; color:#666; margin-top:0;">時間割表の数字の下に表示する時間を設定します。（例: 10:20〜12:00）</p>
+    <div id="timeInputsContainer">
+      <!-- JSで1〜5限の入力欄を生成 -->
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeTimeSettingModal()">キャンセル</button>
+      <button onclick="saveTimeSettings()">保存して反映</button>
+    </div>
+  </div>
+</div>
+
+<!-- 授業編集モーダル -->
+<div id="classModal" class="modal-overlay">
+  <div class="modal-content">
+    <h2 id="modalTitle">授業詳細</h2>
+    <input type="hidden" id="currentCellId">
+    <input type="hidden" id="classColor" value="#e3f2fd">
+    
+    <div class="form-group">
+      <label>授業名</label>
+      <input type="text" id="className" placeholder="例: 日本史">
+    </div>
+
+    <div class="form-group">
+      <label>背景色</label>
+      <div class="color-palette" id="colorPalette"></div>
+    </div>
+
+    <div style="display:flex; gap:10px;">
+      <div class="form-group" style="flex:1">
+        <label>教室</label>
+        <input type="text" id="classRoom" placeholder="302">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>先生</label>
+        <input type="text" id="classTeacher">
+      </div>
+    </div>
+
+    <div class="counter-row">
+      <div class="counter-item">
+        <span style="font-size:11px">出席</span>
+        <button class="secondary small" onclick="changeCount('attendance',-1)" style="flex:none; width:25px">-</button>
+        <span id="attendanceVal" class="counter-val">0</span>
+        <button class="small" onclick="changeCount('attendance',1)" style="flex:none; width:25px">+</button>
+      </div>
+      <div class="counter-item">
+        <span style="font-size:11px">欠席</span>
+        <button class="secondary small" onclick="changeCount('absence',-1)" style="flex:none; width:25px">-</button>
+        <span id="absenceVal" class="counter-val">0</span>
+        <button class="danger small" onclick="changeCount('absence',1)" style="flex:none; width:25px">+</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>メモ</label>
+      <textarea id="classMemo" rows="2"></textarea>
+    </div>
+
+    <div class="task-list-edit">
+      <label style="font-size:12px; font-weight:bold; color:#795548; display:block; margin-bottom:8px;">⚠️ 課題リスト</label>
+      <div id="taskInputsContainer"></div>
+      <button class="btn-add-task small" onclick="addTaskInput()">＋ 課題を追加</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeModal()">戻る</button>
+      <button class="danger" onclick="removeClass()">消去</button>
+      <button onclick="saveClass()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 全課題一覧モーダル -->
+<div id="allTasksModal" class="modal-overlay">
+  <div class="modal-content">
+    <h2>📋 全課題 (期限順)</h2>
+    <div id="allTasksContainer" style="margin-bottom:20px;"></div>
+    <button class="secondary" style="width:100%" onclick="closeAllTasksModal()">閉じる</button>
+  </div>
+</div>
+
+<script>
+  const PRESET_COLORS = [
+    '#ffebee', '#fff3e0', '#fff9c4', '#e8f5e9', '#e3f2fd', '#e8eaf6', '#f3e5f5', '#efebe9', '#f5f5f5'
+  ];
+
+  let store = JSON.parse(localStorage.getItem('timetableStoreV2')) || {};
+  if (!store.list) {
+    store = { defaultName: "デフォルト", current: "デフォルト", list: { "デフォルト": {} }, order: ["デフォルト"], periodTimes: {} };
+  }
+  if (!store.order) store.order = Object.keys(store.list);
+  if (!store.periodTimes) store.periodTimes = {}; 
+
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const dayNames = ['月', '火', '水', '木', '金'];
+
+  function init() {
+    setupColorPalette();
+    if (store.list[store.defaultName]) {
+      store.current = store.defaultName;
+    } else {
+      store.current = store.order[0];
+      store.defaultName = store.current;
+    }
+    buildTable();
+    updateSelectors();
+    renderTimetable();
+  }
+
+  function saveStore() {
+    localStorage.setItem('timetableStoreV2', JSON.stringify(store));
+  }
+
+  /* --- カラーパレットのセットアップ --- */
+  function setupColorPalette() {
+    const palette = document.getElementById('colorPalette');
+    PRESET_COLORS.forEach(color => {
+      let btn = document.createElement('div');
+      btn.className = 'color-btn';
+      btn.style.backgroundColor = color;
+      btn.onclick = () => selectColor(color);
+      palette.appendChild(btn);
+    });
+  }
+
+  function selectColor(colorHex) {
+    document.getElementById('classColor').value = colorHex;
+    const btns = document.querySelectorAll('.color-btn');
+    btns.forEach(btn => {
+      if (btn.style.backgroundColor === hexToRgb(colorHex)) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+  }
+
+  function hexToRgb(hex) {
+    let bigint = parseInt(hex.slice(1), 16);
+    return `rgb(${(bigint >> 16) & 255}, ${(bigint >> 8) & 255}, ${bigint & 255})`;
+  }
+
+  /* --- 時間割表の構築 --- */
+  function buildTable() {
+    const headerRow = document.getElementById('headerRow');
+    const tbody = document.getElementById('timetableBody');
+    
+    // ヘッダー（曜日）の生成
+    headerRow.innerHTML = `<th></th>`;
+    dayNames.forEach(d => {
+      headerRow.innerHTML += `<th>${d}</th>`;
+    });
+
+    // ボディ（時限・セル）の生成
+    tbody.innerHTML = '';
+    for (let p = 1; p <= 5; p++) {
+      let tr = document.createElement('tr');
+      
+      let timeTextHtml = '';
+      if (store.periodTimes[p]) {
+        let rawTime = store.periodTimes[p];
+        let formattedTime = rawTime.replace(/([〜~ー\-～])/g, '<br>$1');
+        timeTextHtml = `<span class="time-text">${formattedTime}</span>`;
+      }
+      
+      tr.innerHTML = `<th>${p}${timeTextHtml}</th>`;
+      
+      days.forEach(d => {
+        let cellId = `${d}-${p}`;
+        tr.innerHTML += `<td id="cell-${cellId}" class="cell" onclick="openClassModal('${cellId}')"></td>`;
+      });
+      tbody.appendChild(tr);
+    }
+  }
+
+  /* --- 時間設定モーダル操作 --- */
+  function openTimeSettingModal() {
+    const container = document.getElementById('timeInputsContainer');
+    container.innerHTML = '';
+    for (let p = 1; p <= 5; p++) {
+      let val = store.periodTimes[p] || '';
+      container.innerHTML += `
+        <div class="form-group" style="display:flex; align-items:center; gap:10px;">
+          <label style="margin:0; width:40px; font-weight:bold;">${p}限</label>
+          <input type="text" id="timeInput_${p}" placeholder="例: 10:20〜12:00" value="${val}" style="flex:1;">
+        </div>
+      `;
+    }
+    document.getElementById('timeSettingModal').classList.add('active');
+  }
+
+  function closeTimeSettingModal() {
+    document.getElementById('timeSettingModal').classList.remove('active');
+  }
+
+  function saveTimeSettings() {
+    for (let p = 1; p <= 5; p++) {
+      store.periodTimes[p] = document.getElementById(`timeInput_${p}`).value.trim();
+    }
+    saveStore();
+    buildTable();
+    renderTimetable();
+    closeTimeSettingModal();
+  }
+
+  /* --- 画像保存機能 --- */
+  function exportImage() {
+    const target = document.getElementById('timetableWrapper');
+    html2canvas(target, {
+      scale: 2, 
+      backgroundColor: '#ffffff'
+    }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = `${store.current}_時間割.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }).catch(err => {
+      alert("画像の生成に失敗しました。お使いのブラウザが対応していない可能性があります。");
+    });
+  }
+
+  // --- その他既存機能群 ---
+  function updateSelectors() {
+    const select = document.getElementById('timetableSelect');
+    select.innerHTML = '';
+    store.order.forEach(name => {
+      if (!store.list[name]) return;
+      let opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name === store.defaultName ? `★ ${name}` : name;
+      if(name === store.current) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    const defBtn = document.getElementById('defaultBtn');
+    if (store.current === store.defaultName) {
+      defBtn.disabled = true; defBtn.textContent = "設定済";
+    } else {
+      defBtn.disabled = false; defBtn.textContent = "★設定";
+    }
+  }
+
+  function renderTimetable() {
+    const currentData = store.list[store.current];
+    days.forEach(d => {
+      for(let p=1; p<=5; p++) {
+        const id = `${d}-${p}`;
+        const td = document.getElementById(`cell-${id}`);
+        const data = currentData[id];
+        if(data && data.name) {
+          td.style.backgroundColor = data.color || PRESET_COLORS[4];
+          td.innerHTML = `<div class="course-name">${data.name}</div><div class="course-room">${data.room || ''}</div>`;
+          if(data.tasks && data.tasks.length > 0) td.classList.add('has-task');
+          else td.classList.remove('has-task');
+        } else {
+          td.style.backgroundColor = '';
+          td.innerHTML = '';
+          td.classList.remove('has-task');
+        }
+      }
+    });
+    saveStore();
+  }
+
+  function switchTimetable() { store.current = document.getElementById('timetableSelect').value; updateSelectors(); renderTimetable(); }
+  function moveTimetable(dir) {
+    const idx = store.order.indexOf(store.current);
+    if (idx < 0) return;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= store.order.length) return;
+    const temp = store.order[idx]; store.order[idx] = store.order[newIdx]; store.order[newIdx] = temp;
+    saveStore(); updateSelectors();
+  }
+  function promptNewTimetable() {
+    const name = prompt("新しい時間割の名前を入力してください:");
+    if(!name) return;
+    if(store.list[name]) return alert("その名前は既に存在します。");
+    store.list[name] = {}; store.order.push(name); store.current = name;
+    updateSelectors(); renderTimetable();
+  }
+  function copyTimetable() {
+    const oldName = store.current;
+    const newName = prompt(`「${oldName}」を複製します。新しい名前を入力してください:`, `${oldName}のコピー`);
+    if(!newName || newName === oldName) return;
+    if(store.list[newName]) return alert("その名前は既に存在します。");
+    store.list[newName] = JSON.parse(JSON.stringify(store.list[oldName]));
+    const idx = store.order.indexOf(oldName); store.order.splice(idx + 1, 0, newName);
+    store.current = newName; updateSelectors(); renderTimetable();
+  }
+  function renameTimetable() {
+    const oldName = store.current;
+    const newName = prompt("新しい名前を入力してください:", oldName);
+    if(!newName || newName === oldName) return;
+    if(store.list[newName]) return alert("その名前は既に存在します。");
+    store.list[newName] = store.list[oldName]; delete store.list[oldName];
+    const idx = store.order.indexOf(oldName); if (idx !== -1) store.order[idx] = newName;
+    if (store.defaultName === oldName) store.defaultName = newName;
+    store.current = newName; updateSelectors(); renderTimetable();
+  }
+  function deleteCurrentTimetable() {
+    if(store.order.length <= 1) return alert("最後の時間割は削除できません。");
+    if(confirm(`時間割「${store.current}」を削除しますか？`)) {
+      delete store.list[store.current];
+      const idx = store.order.indexOf(store.current); if (idx !== -1) store.order.splice(idx, 1);
+      store.current = store.order[0];
+      if (!store.list[store.defaultName]) store.defaultName = store.current;
+      updateSelectors(); renderTimetable();
+    }
+  }
+  function setDefaultTimetable() { store.defaultName = store.current; saveStore(); updateSelectors(); alert(`「${store.current}」をデフォルトに設定しました。`); }
+
+  function openClassModal(id) {
+    document.getElementById('currentCellId').value = id;
+    const data = store.list[store.current][id] || { name:'', room:'', teacher:'', color: PRESET_COLORS[4], attendance:0, absence:0, memo:'', tasks:[] };
+    document.getElementById('className').value = data.name; document.getElementById('classRoom').value = data.room;
+    document.getElementById('classTeacher').value = data.teacher; document.getElementById('attendanceVal').textContent = data.attendance;
+    document.getElementById('absenceVal').textContent = data.absence; document.getElementById('classMemo').value = data.memo;
+    selectColor(data.color || PRESET_COLORS[4]);
+    const taskContainer = document.getElementById('taskInputsContainer');
+    taskContainer.innerHTML = '';
+    (data.tasks || []).forEach(t => addTaskInput(t.text, t.date));
+    document.getElementById('classModal').classList.add('active');
+  }
+  function addTaskInput(text = '', date = '') {
+    const div = document.createElement('div'); div.className = 'task-entry';
+    div.innerHTML = `<span class="task-delete" onclick="this.parentElement.remove()">×</span><input type="text" class="t-text" placeholder="課題内容" value="${text}" style="margin-bottom:5px;"><input type="date" class="t-date" value="${date}">`;
+    document.getElementById('taskInputsContainer').appendChild(div);
+  }
+  function changeCount(id, delta) {
+    const el = document.getElementById(id + 'Val'); let v = parseInt(el.textContent) + delta; if(v < 0) v = 0; el.textContent = v;
+  }
+  function saveClass() {
+    const id = document.getElementById('currentCellId').value;
+    const name = document.getElementById('className').value.trim();
+    if(!name) { removeClass(); return; }
+    const tasks = [];
+    document.querySelectorAll('.task-entry').forEach(row => {
+      const txt = row.querySelector('.t-text').value.trim(); const dt = row.querySelector('.t-date').value;
+      if(txt) tasks.push({ text: txt, date: dt });
+    });
+    store.list[store.current][id] = {
+      name: name, color: document.getElementById('classColor').value, room: document.getElementById('classRoom').value.trim(),
+      teacher: document.getElementById('classTeacher').value.trim(), attendance: parseInt(document.getElementById('attendanceVal').textContent),
+      absence: parseInt(document.getElementById('absenceVal').textContent), memo: document.getElementById('classMemo').value, tasks: tasks
+    };
+    closeModal(); renderTimetable();
+  }
+  function removeClass() { const id = document.getElementById('currentCellId').value; delete store.list[store.current][id]; closeModal(); renderTimetable(); }
+  function closeModal() { document.getElementById('classModal').classList.remove('active'); }
+
+  function openAllTaskList() {
+    const container = document.getElementById('allTasksContainer'); container.innerHTML = ''; const allTasks = [];
+    const currentData = store.list[store.current];
+    Object.keys(currentData).forEach(cellId => {
+      const cell = currentData[cellId]; const [d, p] = cellId.split('-');
+      if(cell.tasks) cell.tasks.forEach(t => { allTasks.push({ course: cell.name, dayTime: `${dayNames[days.indexOf(d)]}曜 ${p}限`, text: t.text, date: t.date }); });
+    });
+    allTasks.sort((a, b) => { if(!a.date) return 1; if(!b.date) return -1; return new Date(a.date) - new Date(b.date); });
+    if(allTasks.length === 0) { container.innerHTML = '<p style="text-align:center; color:#999;">課題はありません</p>'; } 
+    else { allTasks.forEach(t => { container.innerHTML += `<div style="background:white; padding:12px; border-radius:8px; margin-bottom:10px; border-left:5px solid #fbc02d;"><h4 style="margin:0 0 5px 0;">${t.text}</h4><div style="font-size:11px; color:#666;">${t.course} (${t.dayTime})</div>${t.date ? `<span style="background:#f44336; color:white; padding:2px 6px; border-radius:4px; font-size:10px;">期限: ${t.date}</span>` : '<span style="background:#999; color:white; padding:2px 6px; border-radius:4px; font-size:10px;">期限なし</span>'}</div>`; }); }
+    document.getElementById('allTasksModal').classList.add('active');
+  }
+  function closeAllTasksModal() { document.getElementById('allTasksModal').classList.remove('active'); }
+
+  init();
+</script>
+</body>
+</html>
